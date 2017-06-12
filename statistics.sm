@@ -1,0 +1,508 @@
+__init_statistics
+	pass
+
+mean 1
+	# mean value of input vector
+	set $0=sum($1)/dimen($1)
+
+rms 1
+	# rms of input vector
+	set $0 = sqrt(sum((mean($1)-$1)**2)/dimen($1))
+
+stats3 35
+	# stats3 vector mean sigma skewness kurtosis : calculate $mean $sigma etc
+	# skewness and kurtosis are optional parameters.
+	LOCAL DEFINE _n ( dimen($1) )
+	DEFINE $2 ( SUM($1)/$_n )                               	# mean
+	DEFINE $3 ( SQRT(SUM(($1 - $$2)**2)/$_n) )          		# sigma
+	if($?4) {DEFINE $4 ( SUM(($1 - $$2)**3)/$_n/$$3**3 )}		# skewness
+	if($?5) {DEFINE $5 ( SUM(($1 - $$2)**4)/$_n/$$3**4 - 3)}	# kurtosis
+
+stats4 35
+	# stats4 vector mean sigma skewness kurtosis : calculate $mean $sigma etc
+	# skewness and kurtosis are optional parameters. Corrected estimators.
+	LOCAL DEFINE _n (dimen($1))
+	DEFINE $2 (SUM($1)/$_n)                             		# mean
+	DEFINE $3 (SQRT(SUM(($1 - $$2)**2)/($_n-1)))        		# sigma
+	if($?4) {DEFINE $4 (SUM(($1 - $$2)**3)/$_n/$$3**3)}			# skewness
+	if($?5) {DEFINE $5 (SUM(($1 - $$2)**4)/$_n/$$3**4 - 3)}		# kurtosis
+
+tertile 3
+	# stats_med vector median SIQR : calc $median $SIQR from vector
+	local SET temp = $1
+	sort { temp }
+	DEFINE $2 (temp[dimen(temp)/3]) # lower tertile
+	DEFINE $3 (temp[dimen(temp)*2/3])  # upper tertile
+	DELETE temp
+
+percentile 2
+	# percentile vector percent
+	# Find the percentile of a list of values.
+	# ported to sm from python:
+	# http://code.activestate.com/recipes/511478/
+	local set N = sort($1)
+	local set k = (dimen(N)-1)*$2
+	local set f = floor(k)
+	local set c = ceil(k)
+	set $0 = (f==c) ? N[int(k)] : N[f]*(c-k) + N[c]*(k-f)
+
+median 1
+	set $0 = percentile($1,0.5)
+
+dist_mode 2
+	# mode of a binned distribution of data
+	local set x = $1
+	local set y = $2
+	sort {y x}
+	set $0 = x[dimen(x)-1]
+
+dist_mean 2
+	# mean of a binned distribution of data
+	set $0 = integrate($1,$2*$1)/integrate($1,$2)
+
+pdf 35
+	# input bins counts [nstep nmin]
+	local define mi (min($1))
+	local define ma (max($1))
+	local define nstep 20
+	local define nmin 0
+	if ($?4) {define nstep $4}
+	if ($?5) {define nmin $5}
+	local define dw (($ma-$mi)/$nstep)
+	get_hist0 $1 $2 $3 $mi $ma $dw
+	trim $2 $3 $nmin
+	set $3=$3/sum($3)
+
+cdf 36
+	# input bins counts [nstep nmin reverse_flag]
+	if (!$?4) {
+		pdf $1 $2 $3
+	} else {
+		if (!$?5) {
+			pdf $1 $2 $3 $4
+		} else {
+			pdf $1 $2 $3 $4 $5
+		}
+	}
+	if (!$?6) {
+		set $3=cumulate($3)
+	} else {
+		set $3=cumulate2($3)
+	}
+
+pdf0 3
+	set $2=unique($1)
+	set $3=count($1,$2)
+	set $3=$3/sum($3)
+
+cdf0 3
+	pdf0 $1 $2 $3
+	set $3 = cumulate($3)
+
+pdfd 6
+	# manually set min and max
+	local define mi $5
+	local define ma $6
+	local define dw (($ma-$mi)/$4)
+	set $2 = $mi+$dw/2,$ma-$dw/2,$dw
+	set $3=HISTOGRAM($1:$2)
+
+pdfd_fd 8
+	# pdfd_fd vec err bin_center bin_number bin_error nbins min max
+	# Freedman-Diaconis binning with proper errors
+	local define N  $6
+	local define mi $7
+	local define ma $8
+	local define dw (($ma-$mi)/$N)
+	local set ibin = int(($1-$mi)/$dw)
+	set $3 = $mi+$dw/2,$ma-$dw/2,$dw
+	set $4 = zeros($N)
+	set $5 = zeros($N)
+	define i local
+	define s local
+	define nn local
+	set xx local set ee local
+	local define _v $verbose
+	verbose 0
+	do i=0,$N-1 {
+		set xx = $1 if (ibin==$i)
+		define nn (dimen(xx))
+		if ($nn) {
+			set ee = $2 if (ibin==$i)
+			define s2 (sum(1/ee**2))
+			set $3[$i] = sum(xx/ee**2)/$s2
+			set $4[$i] = $nn
+			set $5[$i] = sqrt(1/$s2)
+			#set $5[$i] = sqrt(sum(ee**2)/$nn)
+		}
+	}
+	verbose $_v
+
+pdfd_ep 7
+	# pdfd_ep ver err bin_centers bin_width bin_number bin_error nbins
+	# equal probability binning with proper errors
+	local define N $7
+	set cx local set cy local
+	set yb local set xb local
+	#cdf0 $1 cx cy
+	set cx = sort($1)
+	set cy = cumulate(ones_like(cx)/dimen(cx))
+	set yb = 0,1,1/$N
+	interp2 cy cx yb xb
+	set $3 = bincenters(xb)
+	set $4 = binwidth(xb)
+	set $5 = zeros($N)
+	set $6 = zeros($N)
+	define i local
+	define s local
+	define nn local
+	set xx local set ee local
+	local define _v $verbose
+	verbose 0
+	do i=0,$N-1 {
+		set xx = $1 if ($1 > xb[$i] && $1 <= xb[$i+1])
+		define nn (dimen(xx))
+		if ($nn) {
+			set ee = $2 if ($1 > xb[$i] && $1 <= xb[$i+1])
+			define s2 (sum(1/ee**2))
+			set $3[$i] = sum(xx/ee**2)/$s2
+			set $5[$i] = $nn
+			set $6[$i] = sqrt(1/$s2)
+			#set $6[$i] = sqrt(sum(ee**2))/$nn
+		}
+	}
+	verbose $_v
+
+cumulate2 1
+	# evaluate P(>=x)
+	set $0=reverse(cumulate(reverse($1)))
+
+diff 12
+	# diff y [reverse_flag]
+	local define d dimen($1)
+	declare $0 $d
+	define i local
+	if (!$?2) {
+		set $0[0]=$1[0]
+		do i=1,$d-1 {
+			set $0[$i]=$1[$i]-$1[$i-1]
+		}
+	} else {
+		do i=0,$d-2 {
+			set $0[$i]=$1[$i]-$1[$i+1]
+		}
+		set $0[$d-1]=$1[$d-1]
+	}
+
+equal_binsize 1
+	set $0=($1[dimen($1)-1]-$1[0])/(dimen($1)-1)
+
+binsize 1
+	local define d (dimen($1))
+	declare $0 $d
+	define i local
+	do i=1,$d-2 {
+		set $0[$i]=($1[$i+1]-$1[$i-1])/2
+	}
+	set $0[0]=$1[1]-$1[0]
+	set $0[$d-1]=$1[$d-1]-$1[$d-2]
+
+resample 4
+	local define dim (dimen($1))
+	local set rand = random_int($dim,$dim)
+	set $3 = $1[rand]
+	set $4 = $2[rand]
+
+linreg 45
+	# linreg x y a b r
+	# similar to lsq, but also calculate correlation coefficient
+	local define sumx  sum($1)
+	local define sumx2 sum(pow($1,2))
+	local define sumxy sum($1*$2)
+	local define sumy  sum($2)
+	local define sumy2 sum(pow($2,2))
+
+	local define n dimen($1)
+	local define denom ($n*$sumx2 - sqr($sumx))
+	if ($denom==0) {
+		echo "Singular matrix, can't solve the problem."
+		define $3 0
+		define $4 0
+		if ($?5) {define $5 0}
+		set $0=1
+		return
+	}
+
+	define $3 (($n*$sumxy - $sumx*$sumy)/$denom)
+	define $4 (($sumy*$sumx2 - $sumx*$sumxy)/$denom)
+	if ($?5) {
+		define $5 (($sumxy - $sumx*$sumy/$n)/sqrt(($sumx2 - sqr($sumx)/$n)*($sumy2 - sqr($sumy)/$n)))
+	}
+	set $0=0
+
+binbounds 1
+	# return bounds of the bins with centers specified in $1
+	local define d dimen($1)
+	define i local
+	set $0=zeros($d+1)
+	do i=1,$d-1 {
+		set $0[$i]=($1[$i-1]+$1[$i])/2
+	}
+	set $0[0]=$1[0]-($1[1]-$1[0])/2
+	set $0[$d]=$1[$d-1]+($1[$d-1]-$1[$d-2])/2
+
+bincenters 1
+	# return centers of the bins with bounds specified in $1
+	define i local
+	declare $0 $(dimen($1)-1)
+	do i=0,dimen($1)-2 {
+		set $0[$i]=($1[$i]+$1[$i+1])/2
+	}
+
+binwidth 1
+	define i local
+	declare $0 $(dimen($1)-1)
+	do i=0,dimen($1)-2 {
+		set $0[$i]=($1[$i+1]-$1[$i])
+	}
+
+get_hist0 6
+	# get_hist0 input output-x output-y base top width
+	# given $1, get a histogram in $3, with the centres of the
+	# bins in $2. Bins go from $4 to $5, with width $6.
+	# [GB] Patched to fix last element of output-x.
+	SET $2 = $4+$6/2,$5-$6/2,$6
+	SET HELP $2 X-vector for $3
+	SET $3=HISTOGRAM($1:$2)
+	SET HELP $3 Histogram from $1, base $4 width $5
+
+stats_med2 4
+  # stats_med vector median Q25 Q75
+  SET temp = $1
+  sort { temp }
+  DEFINE $2 (temp[dimen(temp)/2])    # median
+  DEFINE $3 (temp[0.25*dimen(temp)]) # lower quartile
+  DEFINE $4 (temp[.75*dimen(temp)])  # upper quartile
+  DELETE temp
+
+getGauss 3
+  # getGauss sigma n output-v
+  set $3 = gaussdev($2)
+  set $3 = $3*$1
+
+getLogn 4
+  # getLogn sigma n central-value output-v
+  set $4 = gaussdev($2)
+  set $4 = $4*$1
+  set $4 = exp(ln($3) + $4)
+
+median0 4
+	 # given an array, calculate median, first and third quartile
+	 # Differs from standard macro median in how calculates median
+	 #
+	 # median0 v $median $q25 $q75 ; from vector v
+	local set tmp = $1
+	sort { tmp }
+	local define dim (dimen($1))
+	 # define median
+	if ($dim==2*int($dim/2)) {define $2 (0.5*(tmp[$dim/2-1] + tmp[$dim/2]))}
+	if ($dim!=2*int($dim/2)) {define $2 (tmp[int($dim/2)])}
+	 # define lower quartile
+	if ($dim==4*int($dim/4)) {define $3 (0.5*(tmp[$dim/4-1] + tmp[$dim/4]))}
+	if ($dim!=4*int($dim/4)) {define $3 (tmp[int($dim/4)])}
+	 # define upper quartile
+	if ($dim==4*int($dim/4)) {define $4 (0.5*(tmp[3*$dim/4-1] + tmp[3*$dim/4]))}
+	if ($dim!=4*int($dim/4)) {define $4 (tmp[int(3*$dim/4)])}
+
+median1 5
+	 # given an array, calculate median, first and third quartile
+	 # and error on the median. Error is calculated from cumulative
+	 # distribution, smoothed by boxcar filter on nn neighbours, with
+	 # nn = 0.2*dimen(array). After Kendall & Stuart
+	 #
+	 # median1 v $median $q25 $q75 $stderr; from vector v
+	local set tmp = $1
+	sort { tmp }
+	local define dim (dimen($1))
+	 # define median
+	if ($dim==2*int($dim/2)) {define $2 (0.5*(tmp[$dim/2-1] + tmp[$dim/2]))}
+	if ($dim!=2*int($dim/2)) {define $2 (tmp[int($dim/2)])}
+	 # define lower quartile
+	if ($dim==4*int($dim/4)) {define $3 (0.5*(tmp[$dim/4-1] + tmp[$dim/4]))}
+	if ($dim!=4*int($dim/4)) {define $3 (tmp[int($dim/4)])}
+	 # define upper quartile
+	if ($dim==4*int($dim/4)) {define $4 (0.5*(tmp[3*$dim/4-1] + tmp[3*$dim/4]))}
+	if ($dim!=4*int($dim/4)) {define $4 (tmp[int(3*$dim/4)])}
+
+	# error on median. First smooth cumulative histogram
+	define mn local define mx local
+	define xh local define yh local
+	define fmed local
+
+	vecminmax tmp mn mx
+	local define dx (($mx - $mn)/dimen(tmp))
+	get_hist tmp xh yh $mn $mx $dx
+	local set yhc = cumulate(yh)
+	set yhc = yhc/yhc[dimen(yhc) - 1]
+	local define fw (int(0.2*$dim))
+	echo "smoothing cumulative on "$fw" elements"
+	if ($fw<2) {
+		echo "WARNING: filter is too small"
+	}
+	smooth yhc ycs $fw
+	 # then get the slope at median
+	local set y1 = yhc if (yhc<0.5)
+	local set y2 = yhc if (yhc>=0.5)
+	local define y1 (y1[dimen(y1) - 1])
+	local define y2 (y2[0])
+	local define dy ($y2 - $y1)
+	define fmed ($dy/$dx)
+	 # error on median is (Kendall & Stuart)
+	define $5 (0.5/($fmed*sqrt($dim)))
+
+median2 6
+	 # given an array, calculate median, first and third quartile
+	 # and error on the median. Error is calculated from frequency
+	 # from differential distribution at median. Bin for histogram
+	 # is taken assuming that data are discrete and equally spaced
+	 #
+	 # median2 v $median $q25 $q75 $stderr bin_width; from vector v
+	local set tmp = $1
+	sort { tmp }
+	local define dim (dimen($1))
+	 # define median
+	if ($dim==2*int($dim/2)) {DEFINE $2 (0.5*(tmp[$dim/2-1] + tmp[$dim/2]))}
+	if ($dim!=2*int($dim/2)) {DEFINE $2 (tmp[int($dim/2)])}
+	 # define lower quartile
+	if ($dim==4*int($dim/4)) {DEFINE $3 (0.5*(tmp[$dim/4-1] + tmp[$dim/4]))}
+	if ($dim!=4*int($dim/4)) {DEFINE $3 (tmp[int($dim/4)])}
+	 # define upper quartile
+	if ($dim==4*int($dim/4)) {DEFINE $4 (0.5*(tmp[3*$dim/4-1] + tmp[3*$dim/4]))}
+	if ($dim!=4*int($dim/4)) {DEFINE $4 (tmp[int(3*$dim/4)])}
+
+	 # error on median from differential histogram
+	set tmp = tmp if (tmp<$6)
+	define mn local define mx local
+	define xh local define yh local
+	define fmed local
+
+	vecminmax tmp mn mx
+	local define dx $6
+	define mn ($mn - 0.5*$dx)
+	define mx ($mx + 0.5*$dx)
+
+	local define md $$2
+	get_hist tmp xh yh $mn $mx $dx
+	set yh = yh/dimen(tmp)
+	local set but = yh if (xh==$md)
+	if (dimen(but)==0) {
+	  local set y1 = yh if (xh<$md)
+	  local set y2 = yh if (xh>$md)
+	  local define y1 (y1[dimen(y1) - 1])
+	  local define y2 (y2[0])
+	  define fmed (0.5*($y1 + $y2))
+	}
+	if (dimen(but)==1) {
+	  define fmed (but[0])
+	}
+	if (dimen(but)>1) {
+	  local define id (dimen(but))
+	  echo "ERROR in macro median2: dimen(but) = "$id""
+	}
+	 # error on median is
+	define $5 (0.5/($fmed*sqrt($dim)))
+
+median3 6
+	 # given an array, calculate median, first and third quartile
+	 # and error on the median. Error is calculated from frequency
+	 # from smoothed differential distribution at median. Smoothed
+	 # distribution is cut ABOVE $6
+	 #
+	 # median2 v $median $q25 $q75 $stderr bin_width; from vector v
+	local set tmp = $1
+	sort { tmp }
+	local define dim (dimen($1))
+	 # define median
+	if ($dim==2*int($dim/2)) {DEFINE $2 (0.5*(tmp[$dim/2-1] + tmp[$dim/2]))}
+	if ($dim!=2*int($dim/2)) {DEFINE $2 (tmp[int($dim/2)])}
+	 # define lower quartile
+	if ($dim==4*int($dim/4)) {DEFINE $3 (0.5*(tmp[$dim/4-1] + tmp[$dim/4]))}
+	if ($dim!=4*int($dim/4)) {DEFINE $3 (tmp[int($dim/4)])}
+	 # define upper quartile
+	if ($dim==4*int($dim/4)) {DEFINE $4 (0.5*(tmp[3*$dim/4-1] + tmp[3*$dim/4]))}
+	if ($dim!=4*int($dim/4)) {DEFINE $4 (tmp[int(3*$dim/4)])}
+
+	 # error on median. First smooth cumulative histogram
+	 # get rid of data above $6. This does not affect result as it does not
+	 # change slope at median.
+	set tmp = tmp if (tmp<$6)
+	define mn local define mx local
+	define xh local define yh local
+	define fmed local
+
+	vecminmax tmp mn mx
+	local define dx (($mx - $mn)/dimen(tmp))
+	get_hist tmp xh yh $mn $mx $dx
+	local set yhc = cumulate(yh)
+	set yhc = yhc/yhc[dimen(yhc) - 1]
+	local define fw (int(0.2*$dim))
+	echo "smoothing cumulative on "$fw" elements"
+	if ($fw<2) {
+		echo "WARNING: filter is too small"
+	}
+	smooth yhc ycs $fw
+	 # then get the slope at median
+	local set y1 = yhc if (yhc<0.5)
+	local set y2 = yhc if (yhc>=0.5)
+	local define y1 (y1[dimen(y1) - 1])
+	local define y2 (y2[0])
+	local define dy ($y2 - $y1)
+	define fmed ($dy/$dx)
+	 # error on median is (Kendall & Stuart)
+	define $5 (0.5/($fmed*sqrt($dim)))
+
+clsq 3
+   # : clsq x y dy
+   # calcola la retta di interpolazione dei
+   # punti con il metodo dei minimi quadrati
+   # calcola poi l'errore su a e b
+   # y=ax+b, sa e sb sono gli errori, resm: residui
+
+	local define s (SUM(1/$3**2))
+	local define sx (SUM($1/$3**2))
+	local define sy (SUM($2/$3**2))
+	local define sxx (SUM($1**2 /$3**2))
+	local define sxy (SUM($1*$2/$3**2))
+
+	local define D ($s*$sxx-$sx**2)
+
+	# y=ax+b
+	define b (($sxx*$sy-$sx*$sxy)/$D)
+	define a (($s*$sxy-$sx*$sy)/$D)
+
+	# errori
+	define sb (SQRT($sxx/$D))
+	define sa (SQRT($s/$D))
+
+	# calcolo dei residui
+	define resm (SQRT(SUM((($2-($a*$1+$b))**2)/($3**2))))
+
+ellipse	 5
+	# Draw an ellipse centered on ($1,$2), with semi-major and
+	# semi-minor axis radii a=$3 and b=$4. If $5 is specified, it
+	# is the position angle over which to rotate the figure. Note
+	# that this angle is defined wrt the positive x-axis.  If $6
+	# and $7 are specified, they are the minimum and maximum angle
+	# (in deg) between which to draw the elliptical arc.
+	# R.A. Jansen -- Oct  5 2006
+		foreach v { ng x y pa t1 t2 t } { SET $v local }
+		if ($?5) { set pa = $5 } else { set pa = 0 }
+		if ($?6) { set t1 = $6 } else { set t1 = 0 }
+		if ($?7) { set t2 = $7 } else { set t2 = 360 }
+		if (t2<t1) { set t = t2  set t2 = t1  set t1 = t }
+		SET ng = t1,t2,((t2-t1)/60)
+		set cospa = cosd(pa)  set cosphi = cosd(ng)
+		set sinpa = sind(pa)  set sinphi = sind(ng)
+		set x = $1 + $3*cosd(pa)*cosd(ng) - $4*sind(pa)*sind(ng)
+		set y = $2 + $3*sind(pa)*cosd(ng) + $4*cosd(pa)*sind(ng)
+		CONNECT x y

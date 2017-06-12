@@ -1,0 +1,42 @@
+__init_BDlib
+    debug $FALSE
+    # load library files
+    local define mod "BDlib"
+    loadm $mod math
+    loadm $mod utils
+    loadm $mod statistics
+    loadm $mod cosmology
+    loadm $mod plot
+    loadm $mod viridis
+
+import 12
+    local define init_file $1".sm"
+    if ($?2) {
+        define init_file $2
+    }
+    load2 $1"/"$init_file
+    init $1
+
+init 1
+    local define idx (INDEX('$1','.sm'))
+    local define macro_name (SUBSTR('$1', 0, $idx > 0 ? $idx : 0))
+    __init_$macro_name
+
+loadm 2
+    local define idx (INDEX('$2','.sm'))
+    local define macro_name (SUBSTR('$2', 0, $idx > 0 ? $idx : 0))
+    if ($DEBUG_ENABLED) {
+        echo "loading "$1"/"$macro_name".sm"
+    }
+    load2 $1"/"$macro_name".sm"
+    init $macro_name
+
+debug 01
+    local define d $FALSE
+    if ($?1) {
+        define d $1
+    }
+    define DEBUG_ENABLED $d
+
+dbg
+    define DEBUG_ENABLED (1-$DEBUG_ENABLED)

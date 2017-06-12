@@ -1,0 +1,264 @@
+__init_math
+	# set mathematical and physical constants
+	define e  (2.718281828)
+	define PI (3.141592654)
+	define G  (43.0211349 ) # [Mpc km^2 / 10^10 M_sun s^2] #6.67384e-8 in cgs
+	define H0 100 #*1e+5/(3.08567758e+24)) in cgs
+	define rho_c (3*$H0**2/(8*$PI*$G)) # [10^10 M_sun h^2 / Mpc^3]
+
+log 1
+	# base 10 logarithm, handling log(0) as tiny number
+	local set tmp = ($1>0) ? $1 : 1e-16
+	set $0=lg(tmp)
+
+lmin 1
+	# minimum, disregarding tiny numbers
+	local set tmp = sort($1)
+	set $0 = tmp[ifloor(tmp,-16)+1]
+
+pow 2
+	# power, element-wise
+	set $0=$1**$2
+
+sqr 1
+	# square
+	set $0=$1*$1
+
+sign 1
+	# sign of input value
+	set $0 = ($1==0) ? 0 : ($1>0) ? 1 : -1
+
+min 1
+	# minimum value of input vector
+	local set temp = sort($1)
+	set $0=$(temp[0])
+
+max 1
+	# maximum value of input vector
+	local set temp = reverse(sort($1))
+	set $0=$(temp[0])
+
+min2 2
+	# minimum between two numbers
+	set $0 = ($2<$1) ? $2 : $1
+
+max2 2
+	# maximum between two numbers
+	set $0 = ($2>$1) ? $2 : $1
+
+floor 1
+	# largest integer not exceeding $1
+	# approximate toward -inf
+	set $0=int($1)
+	set $0 = ($1<0 && $0!=$1) ? $0-1 : $0
+
+ceil 1
+	# smallest integer not below $1
+	# approximate toward +inf
+	set $0=int($1)
+	set $0 = ($1>0 && $0!=$1) ? $0+1 : $0
+
+floor2 1
+	# largest integer strictly less than $1
+	local set f = floor($1)
+	set $0 = (f==$1) ? f-1 : f
+
+ceil2 1
+	# smallest integer strictly greater than $1
+	local set c = ceil($1)
+	set $0 = (c==$1) ? c+1 : c
+
+round 12
+	# round to nearest, tie away from zero
+	local define ndec 0
+	if ($?2) {define ndec $2}
+	local set a=$1*10**$ndec
+	local set b=a-floor(a)
+	set $0 = (a>=0) ? (a>=0.5) ? ceil(a) : floor(a) : (b>0.5) ? ceil(a) : floor(a)
+	set $0=$0/10**$ndec
+
+round0 1
+	# round numbers close to zero (underflow)
+	set $0 = (abs($1)<10**-10) ? 0 : $1
+
+nearest_odd 1
+	# return nearest odd integer to input value
+	local define temp (int($1))
+	set $0 = ($temp%2) ? $temp : ($temp+1)
+
+nearest_even 1
+	# return nearest even integer to input value
+	local define temp (int($1))
+	set $0 = ($temp%2) ? ($temp+1) : $temp
+
+binom 2
+	# : binom N k
+	# binomial coefficient (N k) = N!/k!(N-k)!
+	set $0 = factorial($1)/factorial($2)/factorial($1-$2)
+
+linroots 2
+	# : linroots x y
+	# roots of the function y=f(x) with linear interpolation
+	define i local
+	local set ir = empty()
+	do i=0,dimen($1)-2 {
+		if (sign2($2[$i+1])!=sign2($2[$i])) {
+			set ir = ir concat $i
+		}
+	}
+	set ix local
+	set iy local
+	declare $0 dimen(ir)
+	do i=0,dimen(ir)-1 {
+		set ix = $1[ir[$i]] concat $1[ir[$i]+1]
+		set iy = $2[ir[$i]] concat $2[ir[$i]+1]
+		interp2 iy ix <0> $0[$i]
+	}
+
+linint 5
+	# : linint $x1 $y1 $x2 $y2 x
+	# Given two points (x1,y1) and (x2,y2), compute the y-coordinate of
+	# the corresponding straight line for the given x-coordinates
+	set $0 = (($4-$3)*$5 + ($3*$2-$4*$1))/($2-$1)
+
+deriv 4
+	# : deriv x y x0 dy/dx(x0)
+	# Given two arrays $1 and $2, calculates the numerical derivative dy/dx
+	# in $4, at position $3. NOTE: $1 and $2 must have the same dimension!
+	if (dimen($1)!=dimen($2)) {
+		echo arrays $1 and $2 must have same dimension!
+		return
+	}
+	local define x1 ($1[0])
+	local define x2 ($1[dimen($1)-1])
+	local define dx (($x2-$x1)/(dimen($1)-1))
+	local set xs = $x1,$x2,$dx
+	spline $1 $2 xs ys
+	local set xs1 = 0 concat xs
+	local set xs2 = xs concat 0
+	local set ys1 = 0 concat ys
+	local set ys2 = ys concat 0
+	local set dxs = xs2 - xs1
+	local set dys = ys2 - ys1
+	local set dydx = dys/dxs
+	local set ind = 1,dimen(dydx)
+	set $4 = dydx if (ind > 1 && ind < dimen(dydx))
+	set $3 = $x1 + 0.5*$dx, $x2 - 0.5*$dx,$dx
+
+deriv2 2
+	# : deriv2 x y
+	# numerical derivative of the input vectors, evaluated in $1
+	set xx local
+	set yy local
+	deriv $1 $2 xx yy
+	interp2 xx yy $1 $0
+
+integrate 23
+	# : integrate x y <method>
+	# numerical integration
+	local set x = $1
+	local set y = $2
+	local define mtd 3
+	if ($?3) {define mtd $3}
+	local set dx = binsize(x)
+	local define N (dimen(x))
+	set i local
+	set w local
+	if ($mtd==0) {
+		# open trapezoid
+		set $0 = sum(y*dx)
+	}
+	if ($mtd==1) {
+		# trapezoid
+		set $0 = sum(y*dx)-(y[0]*dx[0]+y[$N-1]*dx[$N-1])/2
+	}
+	if ($mtd==2) {
+		# simpson
+		set w = ones($N)
+		set i = 1,$N-1
+		set w[i] = (i%2) ? 2 : 4
+		set $0 = sum(y*dx*w/3)
+	}
+	if ($mtd==3) {
+		# uneven trapezoid
+		set w = zeros($N)
+		set w[0] = (x[1] - x[0])/2
+		set i=1,$N-2
+		set w[i] = (x[i+1] - x[i-1])/2
+		set w[$N-1] = (x[$N-1] - x[$N-2])/2
+		set $0 = sum(y*w)
+	}
+
+Gamma 1
+	# Γ(x): complete gamma function
+	if ($1>1e-8) {
+		set $0=factorial($1-1)
+	} else {
+		set $0=1/$1
+	}
+
+LowerGamma 2
+	# γ(t,x): lower incomplete gamma function
+	set $0 = GAMMA($1,$2)*Gamma($1)
+
+UpperGamma 2
+	# Γ(t,x): upper incomplete gamma function
+	set $0 = (1-GAMMA($1,$2))*Gamma($1)
+
+LnGamma 1
+	# natural logarithm of the Gamma function of input vector
+	local set z=$1
+	declare $0 dimen(z)
+	define i local
+	do i=0,dimen(z)-1 {
+		set $0[$i] = GAMMLN(z[$i])
+	}
+
+GAMMLN 1
+	# Returns the value ln[Γ($1)] for $1 > 0. Full accuracy is obtained for $1 > 1.
+	# Ported from FORTRAN, Numerical Recipies, FUNCTION GAMMLN(XX), §6.1, pag. 157.
+	# FORTRAN-like CAPS LOCK madness intended.
+	LOCAL DEFINE XX $1
+	LOCAL SET COF = {76.18009173D0 -86.50532033D0 24.01409822D0 -1.231739516D0 0.120858003D-2 -0.536382D-5}
+	LOCAL DEFINE STP 2.50662827465D0
+	DEFINE X LOCAL DEFINE TMP LOCAL DEFINE SER LOCAL DEFINE J LOCAL
+	DEFINE X ($XX-1.)
+	DEFINE TMP ($X+5.5)
+	DEFINE TMP (($X+0.5)*ln($TMP)-$TMP)
+	DEFINE SER 1.
+	DO J=0,5 {
+		DEFINE X ($X+1.)
+		DEFINE SER ($SER+COF[$J]/$X)
+	}
+	SET $0 = $TMP + ln($STP*$SER)
+
+gauss_prob 1
+	# probability enclosed inside $1 sigmas in a gaussian distribution
+	set $0 = erf($1/sqrt(2))
+
+interp 4
+	# Linearily interpolate $3 into ($1,$2), giving $4
+	# $1 must be uniformly spaced. See also interp2
+	# Overloaded to use local variables
+	local set _$3 = ($3 - $1[0])/($1[1] - $1[0])
+	local set _$20=$2[_$3]
+	local set _$21=$2[_$3 + 1]
+	set $4=_$20 + (_$3 - int(_$3))*(_$21-_$20)
+
+interp2 4
+	# Linearily interpolate $3 into ($1,$2), giving $4
+	# Note that x must be increasing. Points beyond the range of x
+	# are interpolated linearily
+	# Overloaded to use local variables
+	if (dimen($1) < 2) {
+		user abort "Please use vectors with at least 2 elements"
+	}
+	if (dimen($1) != dimen($2)) {
+		user abort "$!1 and $!2 have different dimensions"
+	}
+	local set idx = ifloor($1,$3)
+	local set x1 = $1[(idx < 0 ? 0 : idx >= dimen($1) - 1 ? dimen($1) - 2 : idx)]
+	local set y1 = $2[(idx < 0 ? 0 : idx >= dimen($1) - 1 ? dimen($1) - 2 : idx)]
+	local set x2 = $1[(idx < 0 ? 1 : idx >= dimen($1) - 1 ? dimen($1) - 1 : idx + 1)]
+	local set y2 = $2[(idx < 0 ? 1 : idx >= dimen($1) - 1 ? dimen($1) - 1 : idx + 1)]
+	set $4 = y1 + ($3 - x1)*(y2 - y1)/(x1 == x2 ? 1 : x2 - x1)
