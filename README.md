@@ -2,8 +2,6 @@
 
 What's missing in SM
 
-(work in progress)
-
 [https://github.com/Ganondolf/BDlib](https://github.com/Ganondolf/BDlib)
 
 ## Installation
@@ -15,10 +13,10 @@ Copy the entire content of this library in a subfolder of your local directory. 
     init BDlib
 ```
 
-Make also sure you have the load2 macro in your default file:
+Make sure you have the load2 macro in your default file:
 
 ```
-    load2 1
+load2 1
     # load macros in local default directory
     local define macro2 :       # get user directory
     macro read "$!macro2"$1     # read macro file
